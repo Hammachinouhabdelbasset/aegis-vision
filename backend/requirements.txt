@@ -1,0 +1,8 @@
+fastapi
+fpdf
+starlette
+uvicorn
+opencv-python
+numpy
+mediapipe
+ultralytics

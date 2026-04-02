@@ -27,13 +27,13 @@ from starlette.websockets import WebSocketState
 #  MONITOR IMPORT — SWAP LINE
 #  Change ONLY this line to switch implementations.
 # ──────────────────────────────────────────────
-from mock_monitor import MockDriverMonitor as Monitor
+from driver_monitor import DriverMonitor as Monitor
 # from driver_monitor import DriverMonitor as Monitor
 
 # ──────────────────────────────────────────────
 #  Configuration
 # ──────────────────────────────────────────────
-FRAME_INTERVAL_S: float = 1 / 30          # ~33ms → 30 fps target
+FRAME_INTERVAL_S: float = 1 / 10         # ~100ms → 10 fps target
 WS_SEND_TIMEOUT_S: float = 1.0           # drop frame if client can't keep up
 MAX_CONSECUTIVE_ERRORS: int = 50          # failsafe: kill loop after N errors
 FRONTEND_BUILD_DIR: str = os.getenv(
@@ -51,15 +51,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("aegis.backend")
 
-# ──────────────────────────────────────────────
-#  Monitor singleton
-# ──────────────────────────────────────────────
+
 monitor: Monitor | None = None
 
 
-# ──────────────────────────────────────────────
-#  Lifecycle
-# ──────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown hooks."""
@@ -80,9 +75,7 @@ async def lifespan(app: FastAPI):
     logger.info("Monitor closed ✓")
 
 
-# ──────────────────────────────────────────────
-#  App
-# ──────────────────────────────────────────────
+# app
 app = FastAPI(
     title="AEGIS Vision — DMS Backend",
     version="1.0.0",
@@ -234,7 +227,7 @@ async def ws_stream(ws: WebSocket) -> None:
         while True:
             loop_start = time.perf_counter()
 
-            # ── 1. Acquire frame (off the event loop) ──
+            # 1. acquire frame (off the event loop)
             try:
                 if hasattr(monitor, "process_frame"):
                     data = await asyncio.to_thread(monitor.process_frame)
@@ -260,7 +253,7 @@ async def ws_stream(ws: WebSocket) -> None:
                     logger.error("Too many consecutive errors — closing WS")
                     break
 
-            # ── 2. Send JSON ──
+            # 2. send json
             try:
                 await asyncio.wait_for(
                     ws.send_json({"event": "monitor_update", "data": data}),
@@ -272,7 +265,7 @@ async def ws_stream(ws: WebSocket) -> None:
             except (WebSocketDisconnect, WebSocketException, RuntimeError):
                 break
 
-            # ── 3. Pace to ~30 fps ──
+            # 3. pace to ~30 fps
             elapsed = time.perf_counter() - loop_start
             sleep_time = FRAME_INTERVAL_S - elapsed
             if sleep_time > 0:
