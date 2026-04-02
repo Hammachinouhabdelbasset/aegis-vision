@@ -48,83 +48,209 @@ npm run dev
 ---
 
 ## 🧠 Machine Learning (Computer Vision) Integration Guide
+# AEGIS Vision — Real-Time Driver Monitoring System
 
-This section is specifically for the ML/Python Developer to connect real face-tracking models (like YOLO, Mediapipe, dlib) to the UI.
+A real-time computer vision system that monitors driver behavior and detects multiple risk signals simultaneously using a single camera.
 
-The system is designed with a **Drop-In Architecture**. The FastAPI backend runs on a loop (~30 FPS) and asks an internal `Monitor` class for the current state. Currently, the backend is relying on the `MockDriverMonitor` to simulate data.
+![Python](https://img.shields.io/badge/Python-3.12-blue)
+![MediaPipe](https://img.shields.io/badge/MediaPipe-0.10-green)
+![YOLOv8](https://img.shields.io/badge/YOLO-v8s-red)
+![FastAPI](https://img.shields.io/badge/FastAPI-WebSocket-teal)
+![React](https://img.shields.io/badge/React-19-blue)
 
-### Step 1: Create your ML Monitor
-Create a new file in the backend folder named `driver_monitor.py`. Inside, create a class named `DriverMonitor`. The wrapper class simply needs one method: `process_frame()`, which returns a strictly-formatted dictionary of what your model detects.
+## What it detects
 
-```python
-# backend/driver_monitor.py
+The system continuously tracks five critical driver states:
 
-class DriverMonitor:
-    def __init__(self):
-        # Initialize your ML models here (e.g. YOLO, Mediapipe)
-        self.fps = 0.0
-        print("ML Models loaded!")
+* **Eye closure / drowsiness**
+  Uses Eye Aspect Ratio (EAR), PERCLOS, and blendshape signals.
+  Triggers when eye closure exceeds 30% over a sustained period.
 
-    def process_frame(self, frame=None) -> dict:
-        # 1. Grab camera frame
-        # 2. Run inference
-        # 3. Calculate EAR, MAR, Head Pose, etc.
-        
-        return {
-            "level": "OK",                   # "OK", "WARNING", "ALERT", "CRITICAL"
-            "fps": 30.0,
-            "timestamp_ms": 1714567890123,
-            
-            # --- DROWSINESS ---
-            "drowsy_level": "LOW",           # "LOW", "MODERATE", "HIGH", "CRITICAL"
-            "drowsy_score": 12.4,            # 0.0 to 100.0 scale
-            "ear": 0.31,                     # Eye Aspect Ratio
-            "ear_history": [0.3, 0.3, 0.31], # Recent history for timeline charts
-            "perclos": 0.05,                 # Percentage of eye closure
-            
-            # --- YAWNING ---
-            "yawning": False,                # Boolean
-            "yawn_count_60s": 0,             # Times yawned in last 60 seconds
-            "mar": 0.12,                     # Mouth Aspect Ratio
-            
-            # --- HEAD POSE ---
-            "pitch": 4.2,                    # Head pitch in degrees
-            "yaw": -12.1,                    # Head yaw in degrees
-            "roll": 1.5,                     # Head roll in degrees
-            "nodding": False,                # Is head dropping?
-            
-            # --- GAZE ATTENTION ---
-            "gaze_direction": "FORWARD",     # "FORWARD", "LEFT", "RIGHT", "DOWN"
-            "gaze_alert": False,             # Has gaze been off-road too long?
-            "gaze_off_duration": 0.0,        # Seconds looking away
-            
-            # --- PHONE DISTRACTION ---
-            "phone_detected": False,
-            "phone_alert": False,            # Has phone been detected for > 2 seconds?
-            "phone_duration": 0.0,           # Seconds phone has been up
-            "phone_violations": 0            # Running total of phone usages
-        }
+* **Yawning**
+  Based on Mouth Aspect Ratio (MAR) and jawOpen blendshape.
+  Detects repeated yawns (2 or more within 60 seconds).
+
+* **Head nodding**
+  Derived from head pose estimation (pitch angle).
+  Flags sustained downward head movement beyond 10 degrees.
+
+* **Gaze inattention**
+  Uses iris position relative to eye landmarks.
+  Triggers when the driver looks away from the road for more than 2.5 seconds.
+
+* **Phone usage**
+  Detected using YOLOv8 with COCO class 67.
+  Flags when a phone is visible for more than 2 seconds.
+
+## Project structure
+
+aegis-vision/
+├── backend/
+│   ├── main.py
+│   ├── driver_monitor.py
+│   ├── signals.py
+│   ├── drowsiness_detector.py
+│   ├── landmark_indices.py
+│   ├── face_landmarker.task
+│   ├── best.pt
+│   ├── yolov8n.pt
+│   └── requirements.txt
+└── frontend/
+    ├── src/
+    └── package.json
+
+## Quick start
+
+### Requirements
+
+* Python 3.12
+* Node.js 18+
+* Webcam
+
+### 1 — Download MediaPipe model
+
+```bash
+cd backend
+curl -L -o face_landmarker.task \
+https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
+
+Place both `face_landmarker.task` and `best.pt` inside the `backend/` directory.
+
+### 2 — Backend setup
+
+```bash
+cd backend
+
+py -3.12 -m pip install fastapi uvicorn mediapipe opencv-python ultralytics scipy numpy fpdf2
+
+py -3.12 main.py
+
+The server will run at:
+
+http://localhost:8000
+
+You should see logs indicating that the camera opened successfully and the monitor is running.
+
+### 3 — Frontend setup
+
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
-*(Note: Use `snake_case` exactly as written above. The backend will automatically translate it to `camelCase` before sending it across the WebSocket to React).*
+The dashboard will be available at:
 
-### Step 2: Swap the implementation in `main.py`
-Open `backend/main.py`. Near the very top of the file, locate the Monitor import line (around line 30) and switch it from the Mock to your real ML class:
+http://localhost:5175
 
-```python
-# --- CHANGE THIS ---
-# from mock_monitor import MockDriverMonitor as Monitor
+## ML pipeline overview:
+Webcam frame (640×480)
+        |
+        v
+MediaPipe FaceLandmarker
+  → 478 landmarks
+  → 52 blendshapes
+  → 4×4 head pose matrix
+        |
+        v
+Signal extraction
+  EAR   (eye openness)
+  MAR   (mouth opening)
+  Pose  (pitch, yaw, roll)
+  Gaze  (iris position)
+        |
+        v
+Drowsiness analysis
+  - Rolling PERCLOS window
+  - Yawn frequency tracking
+  - Weighted scoring:
+      EAR (50%) + yawning (30%) + pitch (20%)
+  - Hysteresis levels:
+      OK → WARNING → ALERT
+        |
+        +-- YOLO eye detector (every 3 frames)
+        +-- YOLO phone detector (every 5 frames)
+        |
+        v
+Final state:
+  OK / WARNING / ALERT / CRITICAL
+        |
+        v
+FastAPI WebSocket → React dashboard (8–30 FPS)
 
-# --- TO THIS ---
-from driver_monitor import DriverMonitor as Monitor
-```
+## Data output format
 
-That's it! Restart the FastAPI backend (`python main.py`). 
-The backend will immediately begin continuously calling **your** `process_frame()` method, securely converting the output to JSON, and firing it via WebSockets into the frontend dashboard for live rendering.
+Each processed frame produces structured JSON:
 
----
+
+{
+  "level": "OK | WARNING | ALERT | CRITICAL",
+  "fps": 30.0,
+  "timestamp_ms": 1714567890123,
+  "drowsy_level": "LOW | MODERATE | HIGH | CRITICAL",
+  "drowsy_score": 0.0,
+  "ear": 0.31,
+  "perclos": 0.05,
+  "yawning": false,
+  "yawn_count_60s": 0,
+  "mar": 0.12,
+  "pitch": 4.2,
+  "yaw": -12.1,
+  "roll": 1.5,
+  "gaze_direction": "FORWARD",
+  "phone_detected": false
+}
+
+
+## Configuration
+
+Key parameters can be adjusted directly in the code:
+
+* `use_gpu` in `driver_monitor.py` enables CUDA acceleration
+* `CALIB_FRAMES` controls the initial calibration period
+* `PHONE_ALERT_AFTER_MS` sets the phone detection delay
+* `GAZE_ALERT_AFTER_MS` defines how long gaze must be off-road before alerting
+* `FRAME_INTERVAL_S` controls how often data is sent to the frontend
+
+## Performance
+
+Performance depends on hardware:
+
+* GPU systems (e.g. RTX 3050) can reach 55–70 FPS
+* CPU-only systems typically run at 8–15 FPS
+* Embedded devices like Raspberry Pi 5 run around 8–12 FPS
+* Jetson Nano with CUDA can reach 25–35 FPS
+
+## Dataset
+
+The eye detection model is trained on a dataset of 2,700 images sourced from Roboflow Universe.
+
+It includes two classes:
+
+* `eye_open`
+* `eye_closed`
+
+The data is split into training and validation sets (85% / 15%).
+
+## Design choices
+
+**MediaPipe + YOLO hybrid approach**
+
+MediaPipe provides stable geometric measurements such as EAR, MAR, and head pose.
+YOLO complements this by adding visual classification when landmarks become unreliable (for example with glasses, occlusion, or extreme angles).
+
+**Avoiding full-face classification**
+
+Full-face models require significantly larger datasets and tend to generalize poorly across different individuals.
+Focusing on the eye region provides better consistency with fewer training samples.
+
+**Dynamic EAR calibration**
+
+Instead of using a fixed threshold, the system performs a short calibration phase at startup.
+This adapts to each user's natural eye shape and reduces false positives.
+
 
 ## 📁 System Architecture Summary
-1.  **React Frontend:** Receives telemetry at ~30Hz. Components dynamically re-render SVG paths, needle gauges, and data cards using pure CSS/React state mechanics with zero database lag.
+1.  **React Frontend:** Receives telemetry at ~10Hz(it can be more depending on hardware). Components dynamically re-render SVG paths, needle gauges, and data cards using pure CSS/React state mechanics with zero database lag.
 2.  **FastAPI Backend:** Runs a highly concurrent `asyncio` WebSocket loop. Generates standard Reports (CSV, PDF) natively.
 3.  **JSON Contract:** Enforces a rigid data schema (see above) ensuring the computer vision/ML engineers never have to write any React code, and the UI developers never have to touch PyTorch/OpenCV logs.
