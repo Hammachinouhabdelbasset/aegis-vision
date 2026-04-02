@@ -47,14 +47,14 @@ npm run dev
 
 ---
 
-## 🧠 Machine Learning (Computer Vision) Integration Guide
+## Machine Learning (Computer Vision) Integration Guide
 # AEGIS Vision — Real-Time Driver Monitoring System
 
 A real-time computer vision system that monitors driver behavior and detects multiple risk signals simultaneously using a single camera.
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![MediaPipe](https://img.shields.io/badge/MediaPipe-0.10-green)
-![YOLOv8](https://img.shields.io/badge/YOLO-v8s-red)
+![YOLOv8](https://img.shields.io/badge/YOLO-v8-red)
 ![FastAPI](https://img.shields.io/badge/FastAPI-WebSocket-teal)
 ![React](https://img.shields.io/badge/React-19-blue)
 
